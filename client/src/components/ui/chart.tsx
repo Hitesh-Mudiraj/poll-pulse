@@ -1,108 +1,104 @@
 import React, { useEffect, useRef } from 'react';
-import { Card, CardContent } from "@/components/ui/card";
-import Chart from 'chart.js/auto';
+import { Chart as ChartJS, ArcElement, Tooltip, Legend, ChartData, ChartOptions } from 'chart.js';
+import { Doughnut, Pie, Bar } from 'react-chartjs-2';
 
+ChartJS.register(ArcElement, Tooltip, Legend);
+
+// Common chart props
 interface ChartProps {
-  type: 'doughnut' | 'bar';
-  labels: string[];
-  data: number[];
-  title?: string;
+  data: ChartData<any, any[], any>;
+  options?: ChartOptions<any>;
+  height?: number;
+  width?: number;
+  className?: string;
 }
 
-export function ChartComponent({ type, labels, data, title }: ChartProps) {
-  const chartRef = useRef<HTMLCanvasElement>(null);
-  const chartInstanceRef = useRef<Chart<'doughnut' | 'bar'> | null>(null);
+// Colors for charts
+export const chartColors = [
+  'hsl(var(--chart-1))',
+  'hsl(var(--chart-2))',
+  'hsl(var(--chart-3))',
+  'hsl(var(--chart-4))',
+  'hsl(var(--chart-5))',
+  '#6366F1', // primary-600
+  '#10B981', // green-500
+  '#F97316', // orange-500
+  '#3B82F6', // blue-500
+  '#8B5CF6', // purple-500
+];
 
-  useEffect(() => {
-    if (!chartRef.current) return;
-    
-    // Destroy existing chart if it exists
-    if (chartInstanceRef.current) {
-      chartInstanceRef.current.destroy();
-    }
+// Default chart options
+const defaultOptions: ChartOptions = {
+  responsive: true,
+  maintainAspectRatio: true,
+  plugins: {
+    legend: {
+      position: 'bottom',
+      labels: {
+        padding: 20,
+        boxWidth: 12,
+      },
+    },
+    tooltip: {
+      enabled: true,
+    },
+  },
+};
 
-    // Create color palette based on the primary color
-    const colors = [
-      'hsl(var(--chart-1))',
-      'hsl(var(--chart-2))',
-      'hsl(var(--chart-3))',
-      'hsl(var(--chart-4))',
-      'hsl(var(--chart-5))',
-    ];
-
-    // Create the chart
-    const ctx = chartRef.current.getContext('2d');
-    if (ctx) {
-      chartInstanceRef.current = new Chart(ctx, {
-        type,
-        data: {
-          labels,
-          datasets: [{
-            data,
-            backgroundColor: colors.slice(0, labels.length),
-            borderWidth: 0,
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: true,
-          plugins: {
-            legend: {
-              display: type === 'doughnut',
-              position: 'bottom',
-              labels: {
-                boxWidth: 12,
-                padding: 15,
-              }
-            },
-            title: {
-              display: !!title,
-              text: title || '',
-              font: {
-                size: 16,
-                weight: 'bold'
-              }
-            }
-          },
-          ...(type === 'doughnut' ? {
-            cutout: '70%'
-          } : {
-            scales: {
-              y: {
-                beginAtZero: true,
-                ticks: {
-                  callback: (value) => `${value}%`
-                }
-              }
-            }
-          })
-        }
-      });
-    }
-
-    return () => {
-      if (chartInstanceRef.current) {
-        chartInstanceRef.current.destroy();
-      }
-    };
-  }, [type, labels, data, title]);
+export function DoughnutChart({ 
+  data, 
+  options = {}, 
+  height,
+  width,
+  className = '',
+}: ChartProps) {
+  const mergedOptions = {
+    ...defaultOptions,
+    ...options,
+    cutout: '70%',
+  };
 
   return (
-    <div className="chart-container w-full max-w-md mx-auto">
-      <canvas ref={chartRef} width={300} height={300}></canvas>
+    <div className={className}>
+      <Doughnut data={data} options={mergedOptions} height={height} width={width} />
     </div>
   );
 }
 
-interface ResultsChartProps {
-  labels: string[];
-  data: number[];
+export function PieChart({ 
+  data, 
+  options = {}, 
+  height,
+  width,
+  className = '',
+}: ChartProps) {
+  const mergedOptions = {
+    ...defaultOptions,
+    ...options,
+  };
+
+  return (
+    <div className={className}>
+      <Pie data={data} options={mergedOptions} height={height} width={width} />
+    </div>
+  );
 }
 
-export function DoughnutChart({ labels, data }: ResultsChartProps) {
-  return <ChartComponent type="doughnut" labels={labels} data={data} />;
-}
+export function BarChart({ 
+  data, 
+  options = {}, 
+  height,
+  width,
+  className = '',
+}: ChartProps) {
+  const mergedOptions = {
+    ...defaultOptions,
+    ...options,
+  };
 
-export function BarChart({ labels, data }: ResultsChartProps) {
-  return <ChartComponent type="bar" labels={labels} data={data} />;
+  return (
+    <div className={className}>
+      <Bar data={data} options={mergedOptions} height={height} width={width} />
+    </div>
+  );
 }

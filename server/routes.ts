@@ -1,260 +1,308 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertUserSchema, insertPollSchema, insertVoteSchema, durationMap } from "@shared/schema";
+import { 
+  insertUserSchema, insertPollSchema, insertVoteSchema, insertCommentSchema
+} from "@shared/schema";
+import express from "express";
 import session from "express-session";
-import passport from "passport";
-import { Strategy as LocalStrategy } from "passport-local";
 import MemoryStore from "memorystore";
+import { z } from "zod";
+import { ZodError } from "zod-validation-error";
 
-// Create session store
-const SessionStore = MemoryStore(session);
+declare module "express-session" {
+  interface SessionData {
+    userId: number;
+    username: string;
+  }
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Setup session middleware
+  const httpServer = createServer(app);
+  
+  // Configure session middleware
+  const MemoryStoreSession = MemoryStore(session);
   app.use(
     session({
-      secret: process.env.SESSION_SECRET || "pollwave-secret-key",
+      cookie: { maxAge: 86400000 }, // 24 hours
+      store: new MemoryStoreSession({
+        checkPeriod: 86400000, // 24 hours
+      }),
       resave: false,
       saveUninitialized: false,
-      cookie: { secure: process.env.NODE_ENV === "production", maxAge: 86400000 }, // 1 day
-      store: new SessionStore({
-        checkPeriod: 86400000, // prune expired entries every 24h
-      }),
+      secret: process.env.SESSION_SECRET || "pollpulse-secret-key",
     })
   );
-
-  // Initialize passport
-  app.use(passport.initialize());
-  app.use(passport.session());
-
-  // Configure passport
-  passport.use(
-    new LocalStrategy(
-      {
-        usernameField: "email",
-        passwordField: "password",
-      },
-      async (email, password, done) => {
-        try {
-          const user = await storage.getUserByEmail(email);
-          if (!user) {
-            return done(null, false, { message: "Incorrect email." });
-          }
-          if (user.password !== password) { // In production, use proper password hashing
-            return done(null, false, { message: "Incorrect password." });
-          }
-          return done(null, user);
-        } catch (err) {
-          return done(err);
-        }
-      }
-    )
-  );
-
-  passport.serializeUser((user: any, done) => {
-    done(null, user.id);
-  });
-
-  passport.deserializeUser(async (id: number, done) => {
-    try {
-      const user = await storage.getUser(id);
-      done(null, user);
-    } catch (err) {
-      done(err);
+  
+  // Authentication middleware
+  const requireAuth = (req: Request, res: Response, next: Function) => {
+    if (!req.session.userId) {
+      return res.status(401).json({ message: "Unauthorized" });
     }
-  });
-
-  // Auth middleware
-  const isAuthenticated = (req: Request, res: Response, next: Function) => {
-    if (req.isAuthenticated()) {
-      return next();
-    }
-    res.status(401).json({ message: "Unauthorized" });
+    next();
   };
-
-  // Auth routes
+  
+  // API routes
+  // Authentication
   app.post("/api/auth/register", async (req, res) => {
     try {
       const userData = insertUserSchema.parse(req.body);
       
-      // Check if user already exists
-      const existingUser = await storage.getUserByEmail(userData.email);
+      // Check if username or email already exists
+      const existingUser = await storage.getUserByUsername(userData.username);
       if (existingUser) {
-        return res.status(400).json({ message: "User with this email already exists" });
-      }
-
-      const existingUsername = await storage.getUserByUsername(userData.username);
-      if (existingUsername) {
         return res.status(400).json({ message: "Username already taken" });
       }
-
+      
+      const existingEmail = await storage.getUserByEmail(userData.email);
+      if (existingEmail) {
+        return res.status(400).json({ message: "Email already in use" });
+      }
+      
       // Create user
       const user = await storage.createUser(userData);
       
-      // Auto login
-      req.login(user, (err) => {
-        if (err) {
-          return res.status(500).json({ message: "Error logging in after registration" });
-        }
-        return res.status(201).json({ user: { id: user.id, username: user.username, email: user.email } });
-      });
+      // Set session
+      req.session.userId = user.id;
+      req.session.username = user.username;
+      
+      // Return user without password
+      const { password, ...userWithoutPassword } = user;
+      res.status(201).json(userWithoutPassword);
     } catch (error) {
-      res.status(400).json({ message: error instanceof Error ? error.message : "Invalid request" });
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid input", errors: error.errors });
+      }
+      res.status(500).json({ message: "Server error" });
     }
   });
-
-  app.post("/api/auth/login", passport.authenticate("local"), (req, res) => {
-    const user = req.user as any;
-    res.json({ user: { id: user.id, username: user.username, email: user.email } });
+  
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { username, password } = req.body;
+      
+      if (!username || !password) {
+        return res.status(400).json({ message: "Username and password are required" });
+      }
+      
+      const user = await storage.getUserByUsername(username);
+      if (!user || user.password !== password) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+      
+      // Set session
+      req.session.userId = user.id;
+      req.session.username = user.username;
+      
+      // Return user without password
+      const { password: _, ...userWithoutPassword } = user;
+      res.json(userWithoutPassword);
+    } catch (error) {
+      res.status(500).json({ message: "Server error" });
+    }
   });
-
+  
   app.post("/api/auth/logout", (req, res) => {
-    req.logout(() => {
+    req.session.destroy((err) => {
+      if (err) {
+        return res.status(500).json({ message: "Could not log out" });
+      }
       res.json({ message: "Logged out successfully" });
     });
   });
-
-  app.get("/api/auth/me", (req, res) => {
-    if (!req.user) {
-      return res.status(401).json({ message: "Not authenticated" });
+  
+  app.get("/api/auth/me", async (req, res) => {
+    if (!req.session.userId) {
+      return res.json(null);
     }
-    const user = req.user as any;
-    res.json({ user: { id: user.id, username: user.username, email: user.email } });
+    
+    const user = await storage.getUser(req.session.userId);
+    if (!user) {
+      return res.json(null);
+    }
+    
+    const { password, ...userWithoutPassword } = user;
+    res.json(userWithoutPassword);
   });
-
-  // Poll routes
-  app.post("/api/polls", isAuthenticated, async (req, res) => {
+  
+  // Polls
+  app.post("/api/polls", requireAuth, async (req, res) => {
     try {
-      const user = req.user as any;
-      const { question, options, duration, visibility, isMultipleChoice } = req.body;
+      const pollData = {
+        ...req.body,
+        user_id: req.session.userId,
+      };
       
-      if (!Array.isArray(options) || options.length < 2) {
-        return res.status(400).json({ message: "A poll must have at least 2 options" });
+      const validatedData = insertPollSchema.parse(pollData);
+      const poll = await storage.createPoll(validatedData);
+      
+      res.status(201).json(poll);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid input", errors: error.errors });
       }
-
-      // Calculate end date based on duration
-      const now = new Date();
-      const durationDays = durationMap[duration as keyof typeof durationMap] || 7;
-      const endsAt = new Date(now);
-      endsAt.setDate(endsAt.getDate() + durationDays);
-
-      const pollData = insertPollSchema.parse({
-        question,
-        createdBy: user.id,
-        endsAt,
-        visibility,
-        isMultipleChoice: Boolean(isMultipleChoice),
-        isRandom: false
-      });
-
-      const poll = await storage.createPoll(pollData, options);
-      const pollWithOptions = await storage.getPoll(poll.id);
-
-      res.status(201).json(pollWithOptions);
-    } catch (error) {
-      res.status(400).json({ message: error instanceof Error ? error.message : "Invalid request" });
+      res.status(500).json({ message: "Server error" });
     }
   });
-
-  app.get("/api/polls", async (req, res) => {
-    try {
-      const limit = parseInt(req.query.limit as string) || 6;
-      const offset = parseInt(req.query.offset as string) || 0;
-      const sortBy = req.query.sortBy as string || "newest";
-
-      const polls = await storage.listPolls(limit, offset, sortBy);
-      res.json({ polls });
-    } catch (error) {
-      res.status(500).json({ message: error instanceof Error ? error.message : "Server error" });
-    }
-  });
-
-  app.get("/api/polls/random", async (req, res) => {
+  
+  app.get("/api/polls/trending", async (req, res) => {
     try {
       const limit = parseInt(req.query.limit as string) || 3;
-      const polls = await storage.getRandomPolls(limit);
-      res.json({ polls });
+      const polls = await storage.getTrendingPolls(limit);
+      res.json(polls);
     } catch (error) {
-      res.status(500).json({ message: error instanceof Error ? error.message : "Server error" });
+      res.status(500).json({ message: "Server error" });
     }
   });
-
-  app.get("/api/polls/my", isAuthenticated, async (req, res) => {
+  
+  app.get("/api/polls/recent", async (req, res) => {
     try {
-      const user = req.user as any;
-      const limit = parseInt(req.query.limit as string) || 6;
-      const offset = parseInt(req.query.offset as string) || 0;
-
-      const polls = await storage.listMyPolls(user.id, limit, offset);
-      res.json({ polls });
+      const limit = parseInt(req.query.limit as string) || 5;
+      const polls = await storage.getRecentPolls(limit);
+      res.json(polls);
     } catch (error) {
-      res.status(500).json({ message: error instanceof Error ? error.message : "Server error" });
+      res.status(500).json({ message: "Server error" });
     }
   });
-
+  
+  app.get("/api/polls/random", async (req, res) => {
+    try {
+      const poll = await storage.getRandomPoll();
+      if (!poll) {
+        return res.status(404).json({ message: "No polls available" });
+      }
+      res.json(poll);
+    } catch (error) {
+      res.status(500).json({ message: "Server error" });
+    }
+  });
+  
+  app.get("/api/polls/user", requireAuth, async (req, res) => {
+    try {
+      const polls = await storage.getUserPolls(req.session.userId!);
+      res.json(polls);
+    } catch (error) {
+      res.status(500).json({ message: "Server error" });
+    }
+  });
+  
   app.get("/api/polls/:id", async (req, res) => {
     try {
       const pollId = parseInt(req.params.id);
-      const userId = req.user ? (req.user as any).id : undefined;
+      const userId = req.session.userId;
       
-      const poll = await storage.getPollResults(pollId, userId);
+      const poll = await storage.getPollWithVotes(pollId, userId);
       if (!poll) {
         return res.status(404).json({ message: "Poll not found" });
       }
-
-      res.json({ poll });
+      
+      res.json(poll);
     } catch (error) {
-      res.status(500).json({ message: error instanceof Error ? error.message : "Server error" });
+      res.status(500).json({ message: "Server error" });
     }
   });
-
-  app.post("/api/polls/:id/vote", async (req, res) => {
+  
+  // Votes
+  app.post("/api/votes", async (req, res) => {
     try {
-      const pollId = parseInt(req.params.id);
-      const { optionId } = req.body;
-      const userId = req.user ? (req.user as any).id : undefined;
-
-      // Validate that the poll and option exist
-      const poll = await storage.getPoll(pollId);
+      const voteData = {
+        ...req.body,
+        user_id: req.session.userId,
+      };
+      
+      const { poll_id, option_index } = insertVoteSchema.parse(voteData);
+      
+      // Check if the poll exists
+      const poll = await storage.getPoll(poll_id);
       if (!poll) {
         return res.status(404).json({ message: "Poll not found" });
       }
-
-      const optionExists = poll.options.some(option => option.id === parseInt(optionId));
-      if (!optionExists) {
-        return res.status(400).json({ message: "Option not found" });
+      
+      // Check if the option exists
+      if (option_index < 0 || option_index >= (poll.options as string[]).length) {
+        return res.status(400).json({ message: "Invalid option index" });
       }
-
-      // Check if poll has ended
-      if (poll.endsAt && new Date(poll.endsAt) < new Date()) {
-        return res.status(400).json({ message: "This poll has ended" });
-      }
-
-      // Check if user has already voted on this poll
-      if (userId && !poll.isMultipleChoice) {
-        const existingVote = await storage.getUserVote(pollId, userId);
-        if (existingVote) {
+      
+      // If the user is logged in, check if they already voted
+      if (req.session.userId) {
+        const existingVote = await storage.getUserVoteForPoll(req.session.userId, poll_id);
+        if (existingVote && !poll.allow_multiple) {
           return res.status(400).json({ message: "You have already voted on this poll" });
         }
       }
-
-      const voteData = insertVoteSchema.parse({
-        pollId,
-        optionId: parseInt(optionId),
-        userId
-      });
-
-      await storage.vote(voteData);
-      const updatedPoll = await storage.getPollResults(pollId, userId);
-
-      res.json({ poll: updatedPoll });
+      
+      // Create vote
+      const vote = await storage.createVote({ poll_id, user_id: req.session.userId, option_index });
+      
+      // Return updated poll with votes
+      const updatedPoll = await storage.getPollWithVotes(poll_id, req.session.userId);
+      res.status(201).json(updatedPoll);
     } catch (error) {
-      res.status(400).json({ message: error instanceof Error ? error.message : "Invalid request" });
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid input", errors: error.errors });
+      }
+      res.status(500).json({ message: "Server error" });
     }
   });
-
-  const httpServer = createServer(app);
+  
+  // Comments
+  app.post("/api/comments", requireAuth, async (req, res) => {
+    try {
+      const commentData = {
+        ...req.body,
+        user_id: req.session.userId,
+      };
+      
+      const validatedData = insertCommentSchema.parse(commentData);
+      
+      // Check if the poll exists and allows comments
+      const poll = await storage.getPoll(validatedData.poll_id);
+      if (!poll) {
+        return res.status(404).json({ message: "Poll not found" });
+      }
+      
+      if (!poll.allow_comments) {
+        return res.status(400).json({ message: "This poll does not allow comments" });
+      }
+      
+      const comment = await storage.createComment(validatedData);
+      res.status(201).json(comment);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid input", errors: error.errors });
+      }
+      res.status(500).json({ message: "Server error" });
+    }
+  });
+  
+  app.get("/api/comments/:pollId", async (req, res) => {
+    try {
+      const pollId = parseInt(req.params.pollId);
+      const comments = await storage.getCommentsForPoll(pollId);
+      res.json(comments);
+    } catch (error) {
+      res.status(500).json({ message: "Server error" });
+    }
+  });
+  
+  // Stats
+  app.get("/api/stats/user", requireAuth, async (req, res) => {
+    try {
+      const stats = await storage.getUserStats(req.session.userId!);
+      res.json(stats);
+    } catch (error) {
+      res.status(500).json({ message: "Server error" });
+    }
+  });
+  
+  app.get("/api/stats/overall", async (req, res) => {
+    try {
+      const stats = await storage.getOverallStats();
+      res.json(stats);
+    } catch (error) {
+      res.status(500).json({ message: "Server error" });
+    }
+  });
 
   return httpServer;
 }

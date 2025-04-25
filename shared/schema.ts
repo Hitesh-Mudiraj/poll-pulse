@@ -1,113 +1,102 @@
-import { pgTable, text, serial, integer, boolean, timestamp, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-// Define user schema
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
   email: text("email").notNull().unique(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  name: text("name"),
+  created_at: timestamp("created_at").defaultNow(),
 });
 
+export const polls = pgTable("polls", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  user_id: integer("user_id").references(() => users.id),
+  category: text("category").notNull(),
+  options: jsonb("options").notNull(),
+  allow_multiple: boolean("allow_multiple").default(false),
+  allow_comments: boolean("allow_comments").default(false),
+  end_date: timestamp("end_date"),
+  created_at: timestamp("created_at").defaultNow(),
+});
+
+export const votes = pgTable("votes", {
+  id: serial("id").primaryKey(),
+  poll_id: integer("poll_id").references(() => polls.id).notNull(),
+  user_id: integer("user_id").references(() => users.id),
+  option_index: integer("option_index").notNull(),
+  created_at: timestamp("created_at").defaultNow(),
+});
+
+export const comments = pgTable("comments", {
+  id: serial("id").primaryKey(),
+  poll_id: integer("poll_id").references(() => polls.id).notNull(),
+  user_id: integer("user_id").references(() => users.id).notNull(),
+  content: text("content").notNull(),
+  created_at: timestamp("created_at").defaultNow(),
+});
+
+// Insert schemas
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
   email: true,
-});
-
-// Define poll schema
-export const pollVisibilityEnum = pgEnum("poll_visibility", ["public", "private"]);
-
-export const polls = pgTable("polls", {
-  id: serial("id").primaryKey(),
-  question: text("question").notNull(),
-  createdBy: integer("created_by").references(() => users.id),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  endsAt: timestamp("ends_at"),
-  visibility: text("visibility").notNull().default("public"),
-  isMultipleChoice: boolean("is_multiple_choice").default(false).notNull(),
-  isRandom: boolean("is_random").default(false).notNull(),
+  name: true,
 });
 
 export const insertPollSchema = createInsertSchema(polls).pick({
-  question: true,
-  createdBy: true,
-  endsAt: true,
-  visibility: true,
-  isMultipleChoice: true,
-  isRandom: true,
-});
-
-// Define poll options schema
-export const pollOptions = pgTable("poll_options", {
-  id: serial("id").primaryKey(),
-  pollId: integer("poll_id").references(() => polls.id).notNull(),
-  text: text("text").notNull(),
-});
-
-export const insertPollOptionSchema = createInsertSchema(pollOptions).pick({
-  pollId: true,
-  text: true,
-});
-
-// Define votes schema
-export const votes = pgTable("votes", {
-  id: serial("id").primaryKey(),
-  pollId: integer("poll_id").references(() => polls.id).notNull(),
-  optionId: integer("option_id").references(() => pollOptions.id).notNull(),
-  userId: integer("user_id").references(() => users.id),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  title: true,
+  user_id: true,
+  category: true,
+  options: true,
+  allow_multiple: true,
+  allow_comments: true,
+  end_date: true,
 });
 
 export const insertVoteSchema = createInsertSchema(votes).pick({
-  pollId: true,
-  optionId: true,
-  userId: true,
+  poll_id: true,
+  user_id: true,
+  option_index: true,
 });
 
-// Types
+export const insertCommentSchema = createInsertSchema(comments).pick({
+  poll_id: true,
+  user_id: true,
+  content: true,
+});
+
+// Type definitions
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 
 export type Poll = typeof polls.$inferSelect;
 export type InsertPoll = z.infer<typeof insertPollSchema>;
 
-export type PollOption = typeof pollOptions.$inferSelect;
-export type InsertPollOption = z.infer<typeof insertPollOptionSchema>;
-
 export type Vote = typeof votes.$inferSelect;
 export type InsertVote = z.infer<typeof insertVoteSchema>;
 
-// Extended types for frontend use
-export type PollWithOptions = Poll & {
-  options: PollOption[];
-  creator?: {
-    id: number;
-    username: string;
-  };
+export type Comment = typeof comments.$inferSelect;
+export type InsertComment = z.infer<typeof insertCommentSchema>;
+
+// Custom types
+export type PollWithVotes = Poll & {
   totalVotes: number;
-  userVote?: number;
+  voteResults: { [key: number]: number };
+  userVote?: number | null;
 };
 
-export type PollOptionWithVotes = PollOption & {
-  voteCount: number;
-  percentage: number;
+export type UserStats = {
+  totalPolls: number;
+  totalVotes: number;
+  categoriesVoted: { [key: string]: number };
+  recentActivity: {
+    type: 'created' | 'voted' | 'shared';
+    pollId: number;
+    pollTitle: string;
+    timestamp: Date;
+  }[];
 };
-
-export type PollWithResults = PollWithOptions & {
-  results: PollOptionWithVotes[];
-};
-
-// Duration type for poll creation
-export const durationMap = {
-  "1d": 1,
-  "3d": 3,
-  "1w": 7,
-  "2w": 14,
-  "1m": 30
-};
-
-export const pollDurationSchema = z.enum(["1d", "3d", "1w", "2w", "1m"]);
-export type PollDuration = z.infer<typeof pollDurationSchema>;
