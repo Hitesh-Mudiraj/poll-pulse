@@ -1,9 +1,11 @@
 import { 
-  User, InsertUser, Poll, InsertPoll, Vote, InsertVote, Comment, InsertComment,
-  PollWithVotes, UserStats
+  User, InsertUser, 
+  Poll, InsertPoll, 
+  PollOption, InsertPollOption, 
+  Vote, InsertVote,
+  PollWithOptions, PollOptionWithVotes, PollWithResults
 } from "@shared/schema";
 
-// Storage interface with CRUD methods
 export interface IStorage {
   // User methods
   getUser(id: number): Promise<User | undefined>;
@@ -12,383 +14,316 @@ export interface IStorage {
   createUser(user: InsertUser): Promise<User>;
   
   // Poll methods
-  createPoll(poll: InsertPoll): Promise<Poll>;
-  getPoll(id: number): Promise<Poll | undefined>;
-  getPollWithVotes(id: number, userId?: number): Promise<PollWithVotes | undefined>;
-  getAllPolls(): Promise<Poll[]>;
-  getUserPolls(userId: number): Promise<Poll[]>;
-  getTrendingPolls(limit?: number): Promise<PollWithVotes[]>;
-  getRecentPolls(limit?: number): Promise<Poll[]>;
-  getRandomPoll(): Promise<Poll | undefined>;
+  createPoll(poll: InsertPoll, options: string[]): Promise<Poll>;
+  getPoll(id: number): Promise<PollWithOptions | undefined>;
+  getPollResults(id: number, userId?: number): Promise<PollWithResults | undefined>;
+  listPolls(limit: number, offset: number, sortBy?: string): Promise<PollWithOptions[]>;
+  listMyPolls(userId: number, limit: number, offset: number): Promise<PollWithOptions[]>;
+  getRandomPolls(limit: number): Promise<PollWithOptions[]>;
   
-  // Vote methods
-  createVote(vote: InsertVote): Promise<Vote>;
-  getVotesForPoll(pollId: number): Promise<Vote[]>;
-  getUserVoteForPoll(userId: number, pollId: number): Promise<Vote | undefined>;
-  
-  // Comment methods
-  createComment(comment: InsertComment): Promise<Comment>;
-  getCommentsForPoll(pollId: number): Promise<Comment[]>;
-  
-  // Stats methods
-  getUserStats(userId: number): Promise<UserStats>;
-  getOverallStats(): Promise<{
-    activePolls: number;
-    totalViews: number;
-    totalVotes: number;
-    totalParticipants: number;
-  }>;
+  // Voting methods
+  vote(vote: InsertVote): Promise<Vote>;
+  getUserVote(pollId: number, userId: number): Promise<Vote | undefined>;
 }
 
-// In-memory storage implementation
 export class MemStorage implements IStorage {
   private users: Map<number, User>;
   private polls: Map<number, Poll>;
-  private votes: Map<number, Vote>;
-  private comments: Map<number, Comment>;
-  
+  private pollOptions: Map<number, PollOption[]>;
+  private votes: Map<number, Vote[]>;
   private userIdCounter: number;
   private pollIdCounter: number;
+  private pollOptionIdCounter: number;
   private voteIdCounter: number;
-  private commentIdCounter: number;
-  
+
   constructor() {
     this.users = new Map();
     this.polls = new Map();
+    this.pollOptions = new Map();
     this.votes = new Map();
-    this.comments = new Map();
-    
     this.userIdCounter = 1;
     this.pollIdCounter = 1;
+    this.pollOptionIdCounter = 1;
     this.voteIdCounter = 1;
-    this.commentIdCounter = 1;
     
-    // Add some sample data for testing
-    this.initializeData();
+    this.initializeRandomPolls();
   }
 
-  private initializeData() {
-    // Create a test user
-    const testUser: InsertUser = {
-      username: "testuser",
-      password: "password123",
-      email: "test@example.com",
-      name: "Test User",
-    };
-    const user = this.createUser(testUser);
-
-    // Create some sample polls
-    const categories = ["Technology", "Food", "Entertainment", "Sports", "Education"];
-    const pollTitles = [
-      "Which smartphone OS do you prefer?",
-      "What's your favorite pizza topping?",
-      "Best streaming service?",
-      "Favorite programming language?",
-      "Most essential travel item?",
-      "Do you prefer working from home or office?",
-      "How often do you exercise?",
-      "Favorite social media platform?"
-    ];
-    
-    // Sample options for each poll
-    const pollOptions = [
-      ["iOS", "Android", "Other"],
-      ["Pepperoni", "Mushrooms", "Extra Cheese", "Other"],
-      ["Netflix", "Hulu", "Disney+", "Amazon Prime", "Other"],
-      ["JavaScript", "Python", "Java", "C#", "Go", "Other"],
-      ["Passport", "Phone", "Toiletries", "First Aid Kit", "Travel Pillow"],
-      ["Home", "Office", "Hybrid"],
-      ["Daily", "2-3 times a week", "Once a week", "Rarely", "Never"],
-      ["Facebook", "Twitter", "Instagram", "LinkedIn", "TikTok", "Other"]
-    ];
-    
-    // Create polls with random categories
-    for (let i = 0; i < pollTitles.length; i++) {
-      const category = categories[Math.floor(Math.random() * categories.length)];
-      const endDate = new Date();
-      endDate.setDate(endDate.getDate() + Math.floor(Math.random() * 10) + 1);
-      
-      const poll: InsertPoll = {
-        title: pollTitles[i],
-        user_id: user.id,
-        category,
-        options: pollOptions[i],
-        allow_multiple: Math.random() > 0.7,
-        allow_comments: Math.random() > 0.3,
-        end_date: endDate,
-      };
-      
-      this.createPoll(poll);
-    }
-    
-    // Add some votes
-    const polls = Array.from(this.polls.values());
-    for (const poll of polls) {
-      const numVotes = Math.floor(Math.random() * 1000) + 100;
-      for (let i = 0; i < numVotes; i++) {
-        const randomOptionIndex = Math.floor(Math.random() * (poll.options as string[]).length);
-        this.createVote({
-          poll_id: poll.id,
-          user_id: Math.random() > 0.8 ? user.id : undefined,
-          option_index: randomOptionIndex,
-        });
-      }
-    }
-  }
-  
   // User methods
   async getUser(id: number): Promise<User | undefined> {
     return this.users.get(id);
   }
-  
+
   async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(user => user.username === username);
+    return Array.from(this.users.values()).find(
+      (user) => user.username.toLowerCase() === username.toLowerCase()
+    );
   }
-  
+
   async getUserByEmail(email: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(user => user.email === email);
+    return Array.from(this.users.values()).find(
+      (user) => user.email.toLowerCase() === email.toLowerCase()
+    );
   }
-  
-  async createUser(user: InsertUser): Promise<User> {
+
+  async createUser(insertUser: InsertUser): Promise<User> {
     const id = this.userIdCounter++;
-    const newUser: User = {
-      ...user,
-      id,
-      created_at: new Date(),
+    const user: User = { 
+      ...insertUser, 
+      id, 
+      createdAt: new Date()
     };
-    this.users.set(id, newUser);
-    return newUser;
+    this.users.set(id, user);
+    return user;
   }
-  
+
   // Poll methods
-  async createPoll(poll: InsertPoll): Promise<Poll> {
+  async createPoll(insertPoll: InsertPoll, optionsText: string[]): Promise<Poll> {
     const id = this.pollIdCounter++;
-    const newPoll: Poll = {
-      ...poll,
+    const poll: Poll = {
+      ...insertPoll,
       id,
-      created_at: new Date(),
+      createdAt: new Date()
     };
-    this.polls.set(id, newPoll);
-    return newPoll;
+    
+    this.polls.set(id, poll);
+    
+    // Create options
+    const options: PollOption[] = [];
+    for (const text of optionsText) {
+      const optionId = this.pollOptionIdCounter++;
+      const option: PollOption = {
+        id: optionId,
+        pollId: id,
+        text
+      };
+      options.push(option);
+    }
+    
+    this.pollOptions.set(id, options);
+    this.votes.set(id, []);
+    
+    return poll;
   }
-  
-  async getPoll(id: number): Promise<Poll | undefined> {
-    return this.polls.get(id);
-  }
-  
-  async getPollWithVotes(id: number, userId?: number): Promise<PollWithVotes | undefined> {
+
+  async getPoll(id: number): Promise<PollWithOptions | undefined> {
     const poll = this.polls.get(id);
     if (!poll) return undefined;
     
-    const pollVotes = Array.from(this.votes.values()).filter(vote => vote.poll_id === id);
+    const options = this.pollOptions.get(id) || [];
+    const votes = this.votes.get(id) || [];
     
-    // Calculate vote counts per option
-    const voteResults: { [key: number]: number } = {};
-    for (const vote of pollVotes) {
-      if (!voteResults[vote.option_index]) {
-        voteResults[vote.option_index] = 0;
-      }
-      voteResults[vote.option_index]++;
-    }
-    
-    // Find user's vote if userId is provided
-    let userVote = undefined;
-    if (userId) {
-      const userVoteObj = pollVotes.find(vote => vote.user_id === userId);
-      if (userVoteObj) {
-        userVote = userVoteObj.option_index;
-      }
-    }
+    const creator = poll.createdBy ? this.users.get(poll.createdBy) : undefined;
     
     return {
       ...poll,
-      totalVotes: pollVotes.length,
-      voteResults,
-      userVote,
+      options,
+      creator: creator ? { id: creator.id, username: creator.username } : undefined,
+      totalVotes: votes.length
     };
   }
-  
-  async getAllPolls(): Promise<Poll[]> {
-    return Array.from(this.polls.values());
-  }
-  
-  async getUserPolls(userId: number): Promise<Poll[]> {
-    return Array.from(this.polls.values()).filter(poll => poll.user_id === userId);
-  }
-  
-  async getTrendingPolls(limit: number = 3): Promise<PollWithVotes[]> {
-    // Get all polls with their vote counts
-    const polls = Array.from(this.polls.values());
-    const pollsWithVotes: PollWithVotes[] = [];
+
+  async getPollResults(id: number, userId?: number): Promise<PollWithResults | undefined> {
+    const pollWithOptions = await this.getPoll(id);
+    if (!pollWithOptions) return undefined;
     
-    for (const poll of polls) {
-      const pollVotes = Array.from(this.votes.values()).filter(vote => vote.poll_id === poll.id);
-      
-      // Calculate vote counts per option
-      const voteResults: { [key: number]: number } = {};
-      for (const vote of pollVotes) {
-        if (!voteResults[vote.option_index]) {
-          voteResults[vote.option_index] = 0;
-        }
-        voteResults[vote.option_index]++;
-      }
-      
-      pollsWithVotes.push({
-        ...poll,
-        totalVotes: pollVotes.length,
-        voteResults,
+    const votes = this.votes.get(id) || [];
+    const userVote = userId ? votes.find(v => this.users.get(v.userId!)?.id === userId) : undefined;
+    
+    const results: PollOptionWithVotes[] = pollWithOptions.options.map(option => {
+      const optionVotes = votes.filter(vote => vote.optionId === option.id);
+      return {
+        ...option,
+        voteCount: optionVotes.length,
+        percentage: pollWithOptions.totalVotes === 0 
+          ? 0 
+          : Math.round((optionVotes.length / pollWithOptions.totalVotes) * 100)
+      };
+    });
+    
+    return {
+      ...pollWithOptions,
+      results,
+      userVote: userVote?.optionId
+    };
+  }
+
+  async listPolls(limit: number, offset: number, sortBy?: string): Promise<PollWithOptions[]> {
+    let polls = Array.from(this.polls.values())
+      .filter(poll => poll.visibility === 'public');
+    
+    if (sortBy === 'newest') {
+      polls = polls.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    } else if (sortBy === 'mostVotes') {
+      polls = polls.sort((a, b) => {
+        const aVotes = this.votes.get(a.id)?.length || 0;
+        const bVotes = this.votes.get(b.id)?.length || 0;
+        return bVotes - aVotes;
       });
+    } else if (sortBy === 'endingSoon') {
+      polls = polls
+        .filter(poll => poll.endsAt && poll.endsAt > new Date())
+        .sort((a, b) => a.endsAt!.getTime() - b.endsAt!.getTime());
     }
     
-    // Sort by total votes (trending)
-    pollsWithVotes.sort((a, b) => b.totalVotes - a.totalVotes);
-    
-    return pollsWithVotes.slice(0, limit);
-  }
-  
-  async getRecentPolls(limit: number = 5): Promise<Poll[]> {
-    const polls = Array.from(this.polls.values());
-    polls.sort((a, b) => b.created_at.getTime() - a.created_at.getTime());
-    return polls.slice(0, limit);
-  }
-  
-  async getRandomPoll(): Promise<Poll | undefined> {
-    const polls = Array.from(this.polls.values());
-    if (polls.length === 0) return undefined;
-    return polls[Math.floor(Math.random() * polls.length)];
-  }
-  
-  // Vote methods
-  async createVote(vote: InsertVote): Promise<Vote> {
-    const id = this.voteIdCounter++;
-    const newVote: Vote = {
-      ...vote,
-      id,
-      created_at: new Date(),
-    };
-    this.votes.set(id, newVote);
-    return newVote;
-  }
-  
-  async getVotesForPoll(pollId: number): Promise<Vote[]> {
-    return Array.from(this.votes.values()).filter(vote => vote.poll_id === pollId);
-  }
-  
-  async getUserVoteForPoll(userId: number, pollId: number): Promise<Vote | undefined> {
-    return Array.from(this.votes.values()).find(
-      vote => vote.user_id === userId && vote.poll_id === pollId
+    return Promise.all(
+      polls
+        .slice(offset, offset + limit)
+        .map(poll => this.getPoll(poll.id))
+        .filter((poll): poll is PollWithOptions => poll !== undefined)
     );
   }
-  
-  // Comment methods
-  async createComment(comment: InsertComment): Promise<Comment> {
-    const id = this.commentIdCounter++;
-    const newComment: Comment = {
-      ...comment,
+
+  async listMyPolls(userId: number, limit: number, offset: number): Promise<PollWithOptions[]> {
+    const polls = Array.from(this.polls.values())
+      .filter(poll => poll.createdBy === userId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    
+    return Promise.all(
+      polls
+        .slice(offset, offset + limit)
+        .map(poll => this.getPoll(poll.id))
+        .filter((poll): poll is PollWithOptions => poll !== undefined)
+    );
+  }
+
+  async getRandomPolls(limit: number): Promise<PollWithOptions[]> {
+    const randomPolls = Array.from(this.polls.values())
+      .filter(poll => poll.isRandom && poll.visibility === 'public');
+    
+    // Shuffle array
+    for (let i = randomPolls.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [randomPolls[i], randomPolls[j]] = [randomPolls[j], randomPolls[i]];
+    }
+    
+    return Promise.all(
+      randomPolls
+        .slice(0, limit)
+        .map(poll => this.getPoll(poll.id))
+        .filter((poll): poll is PollWithOptions => poll !== undefined)
+    );
+  }
+
+  // Voting methods
+  async vote(insertVote: InsertVote): Promise<Vote> {
+    const id = this.voteIdCounter++;
+    const vote: Vote = {
+      ...insertVote,
       id,
-      created_at: new Date(),
+      createdAt: new Date()
     };
-    this.comments.set(id, newComment);
-    return newComment;
-  }
-  
-  async getCommentsForPoll(pollId: number): Promise<Comment[]> {
-    return Array.from(this.comments.values())
-      .filter(comment => comment.poll_id === pollId)
-      .sort((a, b) => b.created_at.getTime() - a.created_at.getTime());
-  }
-  
-  // Stats methods
-  async getUserStats(userId: number): Promise<UserStats> {
-    const userPolls = Array.from(this.polls.values()).filter(poll => poll.user_id === userId);
-    const userVotes = Array.from(this.votes.values()).filter(vote => vote.user_id === userId);
     
-    // Calculate votes by category
-    const categoriesVoted: { [key: string]: number } = {};
-    for (const vote of userVotes) {
-      const poll = this.polls.get(vote.poll_id);
-      if (poll) {
-        if (!categoriesVoted[poll.category]) {
-          categoriesVoted[poll.category] = 0;
+    const pollVotes = this.votes.get(insertVote.pollId) || [];
+    
+    // If user has already voted and poll doesn't allow multiple choices, remove previous vote
+    if (insertVote.userId) {
+      const poll = this.polls.get(insertVote.pollId);
+      if (poll && !poll.isMultipleChoice) {
+        const existingVoteIndex = pollVotes.findIndex(v => v.userId === insertVote.userId);
+        if (existingVoteIndex !== -1) {
+          pollVotes.splice(existingVoteIndex, 1);
         }
-        categoriesVoted[poll.category]++;
       }
     }
     
-    // Get recent activity
-    const activity: UserStats['recentActivity'] = [];
+    pollVotes.push(vote);
+    this.votes.set(insertVote.pollId, pollVotes);
     
-    // Created polls
-    for (const poll of userPolls) {
-      activity.push({
-        type: 'created',
-        pollId: poll.id,
-        pollTitle: poll.title,
-        timestamp: poll.created_at,
-      });
-    }
-    
-    // Votes
-    for (const vote of userVotes) {
-      const poll = this.polls.get(vote.poll_id);
-      if (poll) {
-        activity.push({
-          type: 'voted',
-          pollId: poll.id,
-          pollTitle: poll.title,
-          timestamp: vote.created_at,
-        });
-      }
-    }
-    
-    // Sort by recency
-    activity.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-    
-    return {
-      totalPolls: userPolls.length,
-      totalVotes: userVotes.length,
-      categoriesVoted,
-      recentActivity: activity.slice(0, 10),
-    };
+    return vote;
   }
-  
-  async getOverallStats(): Promise<{
-    activePolls: number;
-    totalViews: number;
-    totalVotes: number;
-    totalParticipants: number;
-  }> {
-    const now = new Date();
+
+  async getUserVote(pollId: number, userId: number): Promise<Vote | undefined> {
+    const votes = this.votes.get(pollId) || [];
+    return votes.find(vote => vote.userId === userId);
+  }
+
+  // Initialize with random polls
+  private initializeRandomPolls() {
+    const randomPolls = [
+      {
+        question: "What's your favorite programming language?",
+        options: ["JavaScript", "Python", "Java", "TypeScript", "C#", "Go"],
+        createdBy: "Sarah Johnson"
+      },
+      {
+        question: "How often do you exercise?",
+        options: ["Daily", "2-3 times per week", "Once a week", "Rarely or never"],
+        createdBy: "Alex Chen"
+      },
+      {
+        question: "Which movie genre do you prefer?",
+        options: ["Action", "Comedy", "Drama", "Sci-Fi", "Horror"],
+        createdBy: "Random Poll"
+      },
+      {
+        question: "Do you prefer working from home or in an office?",
+        options: ["Working from home", "Working in the office", "Hybrid approach"],
+        createdBy: "Michelle Taylor"
+      },
+      {
+        question: "What's your preferred mode of transportation?",
+        options: ["Car", "Public transport", "Bicycle", "Walking", "Other"],
+        createdBy: "Random Poll"
+      },
+      {
+        question: "Which social media platform do you use most?",
+        options: ["Instagram", "Twitter", "Facebook", "TikTok", "LinkedIn", "Other"],
+        createdBy: "Jason Lee"
+      }
+    ];
+
+    // Create random users
+    const creators = ["Sarah Johnson", "Alex Chen", "Random Poll", "Michelle Taylor", "Jason Lee"];
+    const creatorIds: Record<string, number> = {};
     
-    // Active polls are those whose end date is in the future
-    const activePolls = Array.from(this.polls.values()).filter(
-      poll => !poll.end_date || poll.end_date > now
-    ).length;
-    
-    // Total votes is just the count of all votes
-    const totalVotes = this.votes.size;
-    
-    // For simplicity, we'll assume each vote = 1 view, plus some extra
-    const totalViews = totalVotes + Math.floor(totalVotes * 0.6);
-    
-    // Unique participants are users who have voted
-    const uniqueVoters = new Set(Array.from(this.votes.values())
-      .filter(vote => vote.user_id !== undefined)
-      .map(vote => vote.user_id));
-    
-    // Add anonymous voters (estimated)
-    const anonymousVoters = Array.from(this.votes.values())
-      .filter(vote => vote.user_id === undefined).length;
-    
-    // Each anonymous voter is counted as a unique participant
-    const totalParticipants = uniqueVoters.size + anonymousVoters;
-    
-    return {
-      activePolls,
-      totalViews,
-      totalVotes,
-      totalParticipants,
-    };
+    creators.forEach(name => {
+      const user: InsertUser = {
+        username: name,
+        password: "password123", // in a real app, would be hashed
+        email: `${name.toLowerCase().replace(/\s/g, '.')}@example.com`
+      };
+      const createdUser = this.createUser(user);
+      creatorIds[name] = this.userIdCounter - 1;
+    });
+
+    // Create polls
+    randomPolls.forEach(pollData => {
+      const creatorId = creatorIds[pollData.createdBy];
+      const now = new Date();
+      const daysToAdd = Math.floor(Math.random() * 14) + 1;
+      const endsAt = new Date(now);
+      endsAt.setDate(endsAt.getDate() + daysToAdd);
+      
+      const poll: InsertPoll = {
+        question: pollData.question,
+        createdBy: creatorId,
+        visibility: "public",
+        isMultipleChoice: false,
+        isRandom: true,
+        endsAt
+      };
+      
+      const createdPoll = this.createPoll(poll, pollData.options);
+      
+      // Add some random votes
+      const pollId = this.pollIdCounter - 1;
+      const options = this.pollOptions.get(pollId) || [];
+      
+      if (options.length > 0) {
+        const numVotes = Math.floor(Math.random() * 500) + 50;
+        for (let i = 0; i < numVotes; i++) {
+          const randomOptionIndex = Math.floor(Math.random() * options.length);
+          const optionId = options[randomOptionIndex].id;
+          
+          this.vote({
+            pollId,
+            optionId,
+            userId: undefined // anonymous vote
+          });
+        }
+      }
+    });
   }
 }
 
