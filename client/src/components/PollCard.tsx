@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Link } from "wouter";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ShareIcon } from "lucide-react";
+import { ShareIcon, ChevronDown, ChevronUp } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
@@ -12,6 +13,8 @@ import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { PollWithVotes } from "@shared/schema";
 import { formatDistanceToNow, parseISO } from "date-fns";
+import { HoverCard, StaggeredContainer, StaggeredItem, Pulse } from "@/components/ui/animated";
+import { useAnimation } from "@/contexts/AnimationContext";
 
 interface PollCardProps {
   poll: PollWithVotes;
@@ -21,13 +24,17 @@ interface PollCardProps {
 export default function PollCard({ poll, onVoteSuccess }: PollCardProps) {
   const { user, openAuthModal } = useAuth();
   const { toast } = useToast();
+  const progressRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const { cardAnimations, chartAnimations } = useAnimation();
+  
   const [selectedOption, setSelectedOption] = useState<number | null>(
     poll.userVote !== undefined ? poll.userVote : null
   );
   const [isVoting, setIsVoting] = useState(false);
   const [showResults, setShowResults] = useState(poll.userVote !== undefined);
-  const options = poll.options as string[];
+  const [isExpanded, setIsExpanded] = useState(false);
   
+  const options = poll.options as string[];
   const hasVoted = poll.userVote !== undefined;
   
   const getCategoryColor = (category: string) => {
@@ -112,93 +119,202 @@ export default function PollCard({ poll, onVoteSuccess }: PollCardProps) {
 
   const categoryColorClass = getCategoryColor(poll.category);
   
+  const toggleExpanded = () => {
+    setIsExpanded(!isExpanded);
+  };
+  
   return (
-    <Card className="overflow-hidden">
-      <CardContent className="p-5">
-        <div className="flex justify-between items-start">
-          <div>
-            <Badge variant="outline" className={`bg-${categoryColorClass}-50 text-${categoryColorClass}-600 hover:bg-${categoryColorClass}-50`}>
-              {poll.category}
-            </Badge>
-            <h3 className="mt-2 text-lg font-medium text-gray-900">{poll.title}</h3>
+    <HoverCard>
+      <Card className="overflow-hidden relative">
+        <CardContent className="p-5">
+          <div className="flex justify-between items-start">
+            <div>
+              <motion.div
+                whileHover={{ scale: 1.05 }}
+                transition={{ duration: 0.2 }}
+              >
+                <Badge variant="outline" className={`bg-${categoryColorClass}-50 text-${categoryColorClass}-600 hover:bg-${categoryColorClass}-50`}>
+                  {poll.category}
+                </Badge>
+              </motion.div>
+              <motion.h3 
+                className="mt-2 text-lg font-medium text-gray-900"
+                whileHover={{ x: 3 }}
+                transition={{ duration: 0.2 }}
+              >
+                {poll.title}
+              </motion.h3>
+            </div>
+            <motion.div whileTap={{ scale: 0.9 }}>
+              <Button variant="ghost" size="icon" onClick={handleShare}>
+                <ShareIcon className="h-5 w-5 text-gray-400 hover:text-gray-500" />
+              </Button>
+            </motion.div>
           </div>
-          <Button variant="ghost" size="icon" onClick={handleShare}>
-            <ShareIcon className="h-5 w-5 text-gray-400 hover:text-gray-500" />
+          
+          <AnimatePresence mode="wait">
+            <motion.div 
+              className="mt-4 space-y-3"
+              initial={cardAnimations ? { opacity: 0, y: 20 } : false}
+              animate={cardAnimations ? { opacity: 1, y: 0 } : { opacity: 1 }}
+              transition={{ duration: 0.5 }}
+            >
+              {showResults ? (
+                // Results view with staggered animation
+                <StaggeredContainer className="space-y-3">
+                  {options.map((option, index) => {
+                    const voteCount = poll.voteResults[index] || 0;
+                    const percentage = poll.totalVotes > 0 
+                      ? Math.round((voteCount / poll.totalVotes) * 100) 
+                      : 0;
+                      
+                    return (
+                      <StaggeredItem key={index}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm font-medium text-gray-700">{option}</span>
+                          <motion.span 
+                            className="text-sm text-gray-500"
+                            initial={chartAnimations ? { opacity: 0 } : false}
+                            animate={chartAnimations ? { opacity: 1 } : { opacity: 1 }}
+                            transition={{ duration: 0.5, delay: index * 0.1 }}
+                          >
+                            {percentage}%
+                          </motion.span>
+                        </div>
+                        <div className="relative">
+                          <div ref={el => progressRefs.current[index] = el}>
+                            <motion.div
+                              initial={chartAnimations ? { width: 0 } : false}
+                              animate={chartAnimations ? { width: `${percentage}%` } : { width: `${percentage}%` }}
+                              transition={{ duration: 0.7, delay: index * 0.1 }}
+                              className={`absolute h-2 rounded-lg ${index === poll.userVote ? `bg-${categoryColorClass}-500` : `bg-${categoryColorClass}-400`}`}
+                              style={{
+                                zIndex: 10
+                              }}
+                            />
+                            <Progress 
+                              value={100} 
+                              className={`h-2 bg-gray-100`}
+                            />
+                          </div>
+                          {index === poll.userVote && (
+                            <motion.span 
+                              className="absolute right-0 -top-5 text-xs text-primary-600"
+                              initial={{ opacity: 0, y: 5 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: 0.5 }}
+                            >
+                              Your vote
+                            </motion.span>
+                          )}
+                        </div>
+                      </StaggeredItem>
+                    );
+                  })}
+                </StaggeredContainer>
+              ) : (
+                // Voting view with animations
+                <RadioGroup value={selectedOption?.toString()} onValueChange={(val) => setSelectedOption(parseInt(val))}>
+                  <StaggeredContainer>
+                    {options.map((option, index) => (
+                      <StaggeredItem key={index}>
+                        <motion.div 
+                          className="flex items-center space-x-2 hover:bg-gray-50 p-2 rounded-md transition-colors cursor-pointer"
+                          whileHover={{ x: 5 }}
+                        >
+                          <RadioGroupItem value={index.toString()} id={`option-${poll.id}-${index}`} />
+                          <Label htmlFor={`option-${poll.id}-${index}`}>{option}</Label>
+                        </motion.div>
+                      </StaggeredItem>
+                    ))}
+                  </StaggeredContainer>
+                </RadioGroup>
+              )}
+            </motion.div>
+          </AnimatePresence>
+          
+          <motion.div 
+            className="mt-5 flex items-center justify-between"
+            initial={cardAnimations ? { opacity: 0 } : false}
+            animate={cardAnimations ? { opacity: 1 } : { opacity: 1 }}
+            transition={{ delay: 0.3 }}
+          >
+            <span className="text-sm text-gray-500">{poll.totalVotes} votes</span>
+            
+            {!showResults ? (
+              <Pulse>
+                <Button 
+                  onClick={handleVote} 
+                  disabled={selectedOption === null || isVoting}
+                  className={isVoting ? "opacity-70 cursor-not-allowed" : ""}
+                >
+                  {isVoting ? (
+                    <motion.span 
+                      animate={{ opacity: [0.5, 1, 0.5] }}
+                      transition={{ duration: 1.5, repeat: Infinity }}
+                    >
+                      Voting...
+                    </motion.span>
+                  ) : "Vote"}
+                </Button>
+              </Pulse>
+            ) : (
+              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                <Button 
+                  variant="outline" 
+                  onClick={() => setShowResults(false)} 
+                  disabled={!hasVoted && poll.totalVotes === 0}
+                >
+                  {hasVoted ? "Change Vote" : "Vote"}
+                </Button>
+              </motion.div>
+            )}
+          </motion.div>
+        </CardContent>
+        
+        <motion.div
+          className="absolute bottom-3 right-3 lg:bottom-5 lg:right-5"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.5 }}
+        >
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="h-8 w-8 rounded-full" 
+            onClick={toggleExpanded}
+          >
+            {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           </Button>
-        </div>
+        </motion.div>
         
-        <div className="mt-4 space-y-3">
-          {showResults ? (
-            // Results view
-            options.map((option, index) => {
-              const voteCount = poll.voteResults[index] || 0;
-              const percentage = poll.totalVotes > 0 
-                ? Math.round((voteCount / poll.totalVotes) * 100) 
-                : 0;
-                
-              return (
-                <div key={index}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-medium text-gray-700">{option}</span>
-                    <span className="text-sm text-gray-500">{percentage}%</span>
-                  </div>
-                  <div className="relative">
-                    <Progress 
-                      value={percentage} 
-                      className={`h-2 ${index === poll.userVote ? `bg-${categoryColorClass}-200` : ""}`}
-                    />
-                    {index === poll.userVote && (
-                      <span className="absolute right-0 -top-5 text-xs text-primary-600">Your vote</span>
-                    )}
-                  </div>
-                </div>
-              );
-            })
-          ) : (
-            // Voting view
-            <RadioGroup value={selectedOption?.toString()} onValueChange={(val) => setSelectedOption(parseInt(val))}>
-              {options.map((option, index) => (
-                <div className="flex items-center space-x-2" key={index}>
-                  <RadioGroupItem value={index.toString()} id={`option-${poll.id}-${index}`} />
-                  <Label htmlFor={`option-${poll.id}-${index}`}>{option}</Label>
-                </div>
-              ))}
-            </RadioGroup>
-          )}
-        </div>
-        
-        <div className="mt-5 flex items-center justify-between">
-          <span className="text-sm text-gray-500">{poll.totalVotes} votes</span>
-          
-          {!showResults ? (
-            <Button 
-              onClick={handleVote} 
-              disabled={selectedOption === null || isVoting}
-              className={isVoting ? "opacity-70 cursor-not-allowed" : ""}
+        <AnimatePresence>
+          {isExpanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.3 }}
             >
-              {isVoting ? "Voting..." : "Vote"}
-            </Button>
-          ) : (
-            <Button 
-              variant="outline" 
-              onClick={() => setShowResults(false)} 
-              disabled={!hasVoted && poll.totalVotes === 0}
-            >
-              {hasVoted ? "Change Vote" : "Vote"}
-            </Button>
+              <CardFooter className="bg-gray-50 px-5 py-3 border-t border-gray-200">
+                <div className="flex justify-between text-sm w-full">
+                  <span className="font-medium text-gray-500">{getEndDateText()}</span>
+                  
+                  <Link href={`/poll/${poll.id}`}>
+                    <motion.a 
+                      className="font-medium text-primary-600 hover:text-primary-500"
+                      whileHover={{ x: 3 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      View Details
+                    </motion.a>
+                  </Link>
+                </div>
+              </CardFooter>
+            </motion.div>
           )}
-        </div>
-      </CardContent>
-      
-      <CardFooter className="bg-gray-50 px-5 py-3 border-t border-gray-200">
-        <div className="flex justify-between text-sm w-full">
-          <span className="font-medium text-gray-500">{getEndDateText()}</span>
-          
-          <Link href={`/poll/${poll.id}`}>
-            <a className="font-medium text-primary-600 hover:text-primary-500">View Details</a>
-          </Link>
-        </div>
-      </CardFooter>
-    </Card>
+        </AnimatePresence>
+      </Card>
+    </HoverCard>
   );
 }

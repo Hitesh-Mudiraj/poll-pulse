@@ -2,6 +2,7 @@ import { Switch, Route } from "wouter";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "./contexts/AuthContext";
+import { AnimationProvider } from "./contexts/AnimationContext";
 import Dashboard from "./pages/Dashboard";
 import CreatePoll from "./pages/CreatePoll";
 import MyPolls from "./pages/MyPolls";
@@ -22,25 +23,27 @@ function App() {
 
   return (
     <AuthProvider>
-      <TooltipProvider>
-        <Toaster />
-        <div className="flex h-screen">
-          <Sidebar isOpen={true} />
-          <MobileHeader onMenuToggle={toggleSidebar} />
-          <MobileMenu isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
-          
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <Switch>
-              <Route path="/" component={Dashboard}/>
-              <Route path="/create-poll" component={CreatePoll}/>
-              <Route path="/my-polls" component={MyPolls}/>
-              <Route path="/discover" component={Discover}/>
-              <Route path="/poll/:id" component={ViewPoll}/>
-              <Route component={NotFound} />
-            </Switch>
+      <AnimationProvider>
+        <TooltipProvider>
+          <Toaster />
+          <div className="flex h-screen">
+            <Sidebar isOpen={true} />
+            <MobileHeader onMenuToggle={toggleSidebar} />
+            <MobileMenu isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
+            
+            <div className="flex-1 flex flex-col overflow-hidden">
+              <Switch>
+                <Route path="/" component={Dashboard}/>
+                <Route path="/create-poll" component={CreatePoll}/>
+                <Route path="/my-polls" component={MyPolls}/>
+                <Route path="/discover" component={Discover}/>
+                <Route path="/poll/:id" component={ViewPoll}/>
+                <Route component={NotFound} />
+              </Switch>
+            </div>
           </div>
-        </div>
-      </TooltipProvider>
+        </TooltipProvider>
+      </AnimationProvider>
     </AuthProvider>
   );
 }

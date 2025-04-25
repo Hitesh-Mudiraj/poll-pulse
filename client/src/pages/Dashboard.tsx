@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { PlusCircle, ClipboardList, Eye, Vote, Users } from "lucide-react";
+import { PlusCircle, ClipboardList, Eye, Vote, Users, Search } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -13,13 +14,25 @@ import { DoughnutChart, chartColors } from "@/components/ui/chart";
 import { PollWithVotes, UserStats } from "@shared/schema";
 import { formatNumber, getTimeAgo, getRandomColor } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
+import { useAnimation } from "@/contexts/AnimationContext";
+import { 
+  AnimatedPage, 
+  FadeIn, 
+  SlideUp, 
+  StaggeredContainer, 
+  StaggeredItem, 
+  Pulse
+} from "@/components/ui/animated";
 
 export default function Dashboard() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const { user } = useAuth();
+  const { chartAnimations, cardAnimations } = useAnimation();
+  
   const [isCreatePollModalOpen, setIsCreatePollModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [hoveredPollId, setHoveredPollId] = useState<number | null>(null);
 
   // Query for overall stats
   const { data: overallStats, isLoading: isLoadingStats } = useQuery({
@@ -101,18 +114,34 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
+    <AnimatedPage>
       {/* Content Header with Actions */}
       <header className="bg-white shadow-sm lg:pl-0 lg:pr-6 pt-4 pb-4 flex items-center justify-between lg:border-b hidden lg:flex">
-        <div className="px-4 md:px-6 lg:px-8">
+        <motion.div 
+          className="px-4 md:px-6 lg:px-8"
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.5 }}
+        >
           <h1 className="text-2xl font-semibold text-gray-900">Dashboard</h1>
-        </div>
-        <div className="flex space-x-4 mr-4">
-          <Button onClick={handleCreatePoll} className="flex items-center">
-            <PlusCircle className="h-5 w-5 mr-2" />
-            Create Poll
-          </Button>
-          <div className="relative">
+        </motion.div>
+        <motion.div 
+          className="flex space-x-4 mr-4"
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.5 }}
+        >
+          <Pulse>
+            <Button onClick={handleCreatePoll} className="flex items-center">
+              <PlusCircle className="h-5 w-5 mr-2" />
+              Create Poll
+            </Button>
+          </Pulse>
+          <motion.div 
+            className="relative"
+            whileHover={{ scale: 1.03 }}
+            transition={{ duration: 0.2 }}
+          >
             <Input
               type="text"
               placeholder="Search polls..."
@@ -120,32 +149,46 @@ export default function Dashboard() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400 absolute right-3 top-2.5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
-            </svg>
-          </div>
-        </div>
+            <Search className="h-5 w-5 text-gray-400 absolute right-3 top-2.5" />
+          </motion.div>
+        </motion.div>
       </header>
 
       {/* Mobile Action Button */}
-      <div className="fixed bottom-6 right-6 z-10 lg:hidden">
+      <motion.div 
+        className="fixed bottom-6 right-6 z-10 lg:hidden"
+        initial={{ opacity: 0, scale: 0.8 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.3, delay: 0.5 }}
+        whileTap={{ scale: 0.9 }}
+      >
         <Button
           onClick={handleCreatePoll}
           className="rounded-full h-14 w-14 flex items-center justify-center shadow-lg p-0"
         >
           <PlusCircle className="h-6 w-6" />
         </Button>
-      </div>
+      </motion.div>
 
       {/* Main Scrollable Content */}
       <main className="flex-1 overflow-y-auto px-4 py-4 lg:py-8 md:px-6 lg:px-8 bg-gray-50 mt-16 lg:mt-0">
         {/* Page Header (mobile only) */}
-        <div className="lg:hidden mb-6">
+        <motion.div 
+          className="lg:hidden mb-6"
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+        >
           <h1 className="text-2xl font-semibold text-gray-900">Dashboard</h1>
-        </div>
+        </motion.div>
         
         {/* Stats Overview */}
-        <div className="mb-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <motion.div 
+          className="mb-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6"
+          initial={cardAnimations ? { opacity: 0, y: 20 } : { opacity: 1 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+        >
           {isLoadingStats ? (
             // Skeleton loaders for stats
             Array(4).fill(0).map((_, i) => (
@@ -160,41 +203,55 @@ export default function Dashboard() {
               </div>
             ))
           ) : (
-            // Actual stat cards
-            <>
-              <StatCard
-                title="Active Polls"
-                value={formatNumber(overallStats?.activePolls || 0)}
-                icon={<ClipboardList className="h-6 w-6" />}
-              />
-              <StatCard
-                title="Total Views"
-                value={formatNumber(overallStats?.totalViews || 0)}
-                icon={<Eye className="h-6 w-6" />}
-                iconBgColor="bg-green-100"
-                iconColor="text-green-600"
-              />
-              <StatCard
-                title="Total Votes"
-                value={formatNumber(overallStats?.totalVotes || 0)}
-                icon={<Vote className="h-6 w-6" />}
-                iconBgColor="bg-orange-100"
-                iconColor="text-orange-600"
-              />
-              <StatCard
-                title="Participants"
-                value={formatNumber(overallStats?.totalParticipants || 0)}
-                icon={<Users className="h-6 w-6" />}
-                iconBgColor="bg-blue-100"
-                iconColor="text-blue-600"
-              />
-            </>
+            // Actual stat cards with staggered animation
+            <StaggeredContainer className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              <StaggeredItem>
+                <StatCard
+                  title="Active Polls"
+                  value={formatNumber(overallStats?.activePolls || 0)}
+                  icon={<ClipboardList className="h-6 w-6" />}
+                />
+              </StaggeredItem>
+              <StaggeredItem>
+                <StatCard
+                  title="Total Views"
+                  value={formatNumber(overallStats?.totalViews || 0)}
+                  icon={<Eye className="h-6 w-6" />}
+                  iconBgColor="bg-green-100"
+                  iconColor="text-green-600"
+                />
+              </StaggeredItem>
+              <StaggeredItem>
+                <StatCard
+                  title="Total Votes"
+                  value={formatNumber(overallStats?.totalVotes || 0)}
+                  icon={<Vote className="h-6 w-6" />}
+                  iconBgColor="bg-orange-100"
+                  iconColor="text-orange-600"
+                />
+              </StaggeredItem>
+              <StaggeredItem>
+                <StatCard
+                  title="Participants"
+                  value={formatNumber(overallStats?.totalParticipants || 0)}
+                  icon={<Users className="h-6 w-6" />}
+                  iconBgColor="bg-blue-100"
+                  iconColor="text-blue-600"
+                />
+              </StaggeredItem>
+            </StaggeredContainer>
           )}
-        </div>
+        </motion.div>
         
         {/* Trending Polls */}
-        <div className="mb-8">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">Trending Polls</h2>
+        <SlideUp className="mb-8">
+          <motion.h2 
+            className="text-xl font-semibold text-gray-900 mb-4"
+            whileInView={{ x: [10, 0] }}
+            transition={{ duration: 0.5 }}
+          >
+            Trending Polls
+          </motion.h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {isLoadingTrending ? (
               // Skeleton loaders for polls
@@ -225,24 +282,46 @@ export default function Dashboard() {
                 </div>
               ))
             ) : trendingPolls && trendingPolls.length > 0 ? (
-              trendingPolls.map((poll: PollWithVotes) => (
-                <PollCard key={poll.id} poll={poll} onVoteSuccess={handlePollVoted} />
-              ))
+              <StaggeredContainer className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {trendingPolls.map((poll: PollWithVotes, index: number) => (
+                  <StaggeredItem key={poll.id}>
+                    <PollCard poll={poll} onVoteSuccess={handlePollVoted} />
+                  </StaggeredItem>
+                ))}
+              </StaggeredContainer>
             ) : (
-              <div className="col-span-3 text-center py-8 bg-white rounded-lg shadow">
+              <motion.div 
+                className="col-span-3 text-center py-8 bg-white rounded-lg shadow"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.5 }}
+              >
                 <p className="text-gray-500">No trending polls available</p>
-                <Button onClick={handleCreatePoll} variant="outline" className="mt-4">
-                  Create Your First Poll
-                </Button>
-              </div>
+                <Pulse>
+                  <Button onClick={handleCreatePoll} variant="outline" className="mt-4">
+                    Create Your First Poll
+                  </Button>
+                </Pulse>
+              </motion.div>
             )}
           </div>
-        </div>
+        </SlideUp>
         
         {/* Recent Polls */}
-        <div className="mb-8">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">Recent Polls</h2>
-          <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+        <SlideUp className="mb-8">
+          <motion.h2 
+            className="text-xl font-semibold text-gray-900 mb-4"
+            whileInView={{ x: [10, 0] }}
+            transition={{ duration: 0.5 }}
+          >
+            Recent Polls
+          </motion.h2>
+          <motion.div 
+            className="bg-white rounded-lg shadow-sm overflow-hidden"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.2 }}
+          >
             {isLoadingRecent ? (
               // Skeleton for recent polls
               <ul className="divide-y divide-gray-200">
@@ -266,55 +345,96 @@ export default function Dashboard() {
               </ul>
             ) : recentPolls && recentPolls.length > 0 ? (
               <ul className="divide-y divide-gray-200">
-                {recentPolls.map((poll: any) => (
-                  <li key={poll.id} className="px-6 py-4 hover:bg-gray-50">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center">
-                        <div className="flex-shrink-0">
-                          <span className={`inline-flex items-center justify-center h-10 w-10 rounded-md ${getRandomColor(poll.id)}`}>
-                            <ClipboardList className="h-6 w-6" />
-                          </span>
-                        </div>
-                        <div className="ml-4">
-                          <h3 className="text-base font-medium text-gray-900">{poll.title}</h3>
-                          <div className="flex items-center mt-1">
-                            <span className="text-xs font-medium text-gray-500">Created by</span>
-                            <span className="text-xs font-medium text-gray-900 ml-1">{poll.user_id ? "User" : "Anonymous"}</span>
-                            <span className="text-xs text-gray-500 mx-1">•</span>
-                            <span className="text-xs text-gray-500">{getTimeAgo(poll.created_at)}</span>
+                <AnimatePresence>
+                  {recentPolls.map((poll: any, index: number) => (
+                    <motion.li 
+                      key={poll.id} 
+                      className="px-6 py-4 hover:bg-gray-50 cursor-pointer transition-colors"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ 
+                        duration: 0.3, 
+                        delay: index * 0.1 
+                      }}
+                      whileHover={{ 
+                        backgroundColor: "rgb(243 244 246)",
+                        x: 5 
+                      }}
+                      onHoverStart={() => setHoveredPollId(poll.id)}
+                      onHoverEnd={() => setHoveredPollId(null)}
+                      onClick={() => navigate(`/poll/${poll.id}`)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center">
+                          <motion.div 
+                            className="flex-shrink-0"
+                            whileHover={{ rotate: 5 }}
+                            animate={hoveredPollId === poll.id ? { scale: [1, 1.1, 1] } : {}}
+                            transition={{ duration: 0.5 }}
+                          >
+                            <span className={`inline-flex items-center justify-center h-10 w-10 rounded-md ${getRandomColor(poll.id)}`}>
+                              <ClipboardList className="h-6 w-6" />
+                            </span>
+                          </motion.div>
+                          <div className="ml-4">
+                            <h3 className="text-base font-medium text-gray-900">{poll.title}</h3>
+                            <div className="flex items-center mt-1">
+                              <span className="text-xs font-medium text-gray-500">Created by</span>
+                              <span className="text-xs font-medium text-gray-900 ml-1">{poll.user_id ? "User" : "Anonymous"}</span>
+                              <span className="text-xs text-gray-500 mx-1">•</span>
+                              <span className="text-xs text-gray-500">{getTimeAgo(poll.created_at)}</span>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                      <div className="flex items-center space-x-4">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => navigate(`/poll/${poll.id}`)}
-                          className="text-primary-600 hover:text-primary-700"
+                        <motion.div 
+                          className="flex items-center space-x-4"
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
                         >
-                          Vote Now
-                        </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-primary-600 hover:text-primary-700"
+                          >
+                            Vote Now
+                          </Button>
+                        </motion.div>
                       </div>
-                    </div>
-                  </li>
-                ))}
+                    </motion.li>
+                  ))}
+                </AnimatePresence>
               </ul>
             ) : (
               <div className="text-center py-8">
                 <p className="text-gray-500">No recent polls available</p>
               </div>
             )}
-          </div>
-        </div>
+          </motion.div>
+        </SlideUp>
         
         {/* Your Activity (only shown if logged in) */}
         {user && (
-          <div>
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">Your Activity</h2>
-            <div className="bg-white rounded-lg shadow-sm overflow-hidden p-6">
+          <FadeIn>
+            <motion.h2 
+              className="text-xl font-semibold text-gray-900 mb-4"
+              whileInView={{ x: [10, 0] }}
+              transition={{ duration: 0.5 }}
+            >
+              Your Activity
+            </motion.h2>
+            <motion.div 
+              className="bg-white rounded-lg shadow-sm overflow-hidden p-6"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5 }}
+            >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Votes by Category */}
-                <div>
+                <motion.div
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.5, delay: 0.2 }}
+                >
                   <h3 className="text-lg font-medium text-gray-900 mb-4">Votes by Category</h3>
                   <div className="relative h-64">
                     {isLoadingUserStats ? (
@@ -322,13 +442,23 @@ export default function Dashboard() {
                         <Skeleton className="h-40 w-40 rounded-full" />
                       </div>
                     ) : (
-                      <DoughnutChart data={prepareChartData(userStats)} />
+                      <motion.div
+                        initial={chartAnimations ? { scale: 0.8, opacity: 0 } : { opacity: 1 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={{ duration: 0.5 }}
+                      >
+                        <DoughnutChart data={prepareChartData(userStats)} />
+                      </motion.div>
                     )}
                   </div>
-                </div>
+                </motion.div>
                 
                 {/* Recent Activity */}
-                <div>
+                <motion.div
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.5, delay: 0.2 }}
+                >
                   <h3 className="text-lg font-medium text-gray-900 mb-4">Recent Activity</h3>
                   <div className="space-y-4">
                     {isLoadingUserStats ? (
@@ -341,31 +471,39 @@ export default function Dashboard() {
                         </div>
                       ))
                     ) : userStats && userStats.recentActivity.length > 0 ? (
-                      userStats.recentActivity.slice(0, 4).map((activity, index) => {
-                        const borderColors = {
-                          created: 'border-primary-500',
-                          voted: 'border-green-500',
-                          shared: 'border-orange-500'
-                        };
-                        return (
-                          <div key={index} className={`border-l-4 ${borderColors[activity.type]} pl-4 py-2`}>
-                            <p className="text-sm font-medium text-gray-900">
-                              You {activity.type === 'created' ? 'created a new poll' : 
-                                activity.type === 'voted' ? 'voted on a poll' : 'shared a poll'}
-                            </p>
-                            <p className="text-sm text-gray-500">"{activity.pollTitle}"</p>
-                            <p className="text-xs text-gray-500 mt-1">{getTimeAgo(activity.timestamp)}</p>
-                          </div>
-                        );
-                      })
+                      <StaggeredContainer>
+                        {userStats.recentActivity.slice(0, 4).map((activity, index) => {
+                          const borderColors = {
+                            created: 'border-primary-500',
+                            voted: 'border-green-500',
+                            shared: 'border-orange-500'
+                          };
+                          return (
+                            <StaggeredItem key={index}>
+                              <motion.div 
+                                className={`border-l-4 ${borderColors[activity.type]} pl-4 py-2`}
+                                whileHover={{ x: 5, backgroundColor: "rgba(243, 244, 246, 0.5)" }}
+                                transition={{ duration: 0.2 }}
+                              >
+                                <p className="text-sm font-medium text-gray-900">
+                                  You {activity.type === 'created' ? 'created a new poll' : 
+                                    activity.type === 'voted' ? 'voted on a poll' : 'shared a poll'}
+                                </p>
+                                <p className="text-sm text-gray-500">"{activity.pollTitle}"</p>
+                                <p className="text-xs text-gray-500 mt-1">{getTimeAgo(activity.timestamp)}</p>
+                              </motion.div>
+                            </StaggeredItem>
+                          );
+                        })}
+                      </StaggeredContainer>
                     ) : (
                       <p className="text-center text-gray-500 py-4">No recent activity</p>
                     )}
                   </div>
-                </div>
+                </motion.div>
               </div>
-            </div>
-          </div>
+            </motion.div>
+          </FadeIn>
         )}
       </main>
 
@@ -375,6 +513,6 @@ export default function Dashboard() {
         onClose={() => setIsCreatePollModalOpen(false)}
         onPollCreated={handlePollCreated}
       />
-    </div>
+    </AnimatedPage>
   );
 }
